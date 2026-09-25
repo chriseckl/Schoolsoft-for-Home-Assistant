@@ -94,9 +94,9 @@ description: Notify once when the current SchoolSoft lesson is marked absent or 
 triggers:
   - trigger: state
     entity_id: sensor.current_lesson_attendance
-    to:
-      - absent
-      - late
+conditions:
+  - condition: template
+    value_template: "{{ trigger.to_state.state in ['absent', 'late'] }}"
 actions:
   - action: notify.send_message
     data:
