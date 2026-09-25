@@ -26,13 +26,18 @@ class SchoolSoftCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         lessons: list[Lesson] = []
         attendance_text = ""
         try:
-            for offset in (-1, 0, 1):
-                target = now.date().fromordinal(now.date().toordinal() + offset * 7)
-                iso = target.isocalendar()
-                week_lessons, page_text, records = await self.client.async_fetch_week(iso.week, iso.year)
-                lessons.extend(apply_attendance(week_lessons, records))
-                if offset == 0:
-                    attendance_text = page_text
+            if self.client.has_ical:
+                iso = now.date().isocalendar()
+                _, attendance_text, records = await self.client.async_fetch_week(iso.week, iso.year)
+                lessons = apply_attendance(await self.client.async_fetch_ical(), records)
+            else:
+                for offset in (-1, 0, 1):
+                    target = now.date().fromordinal(now.date().toordinal() + offset * 7)
+                    iso = target.isocalendar()
+                    week_lessons, page_text, records = await self.client.async_fetch_week(iso.week, iso.year)
+                    lessons.extend(apply_attendance(week_lessons, records))
+                    if offset == 0:
+                        attendance_text = page_text
         except SchoolSoftError as err:
             raise UpdateFailed(str(err)) from err
         return {"lessons": sorted(set(lessons), key=lambda x: (x.start, x.end, x.summary)), "attendance": _attendance(attendance_text)}

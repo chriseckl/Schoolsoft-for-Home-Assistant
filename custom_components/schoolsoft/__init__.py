@@ -16,7 +16,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SchoolSoftConfigEntry) -
     coordinator = SchoolSoftCoordinator(
         hass,
         async_get_clientsession(hass),
-        entry.data,
+        {**entry.data, **entry.options},
         UPDATE_INTERVAL,
     )
     await coordinator.async_config_entry_first_refresh()

@@ -1,3 +1,31 @@
 {
-  "config": {"step": {"user": {"title": "SchoolSoft", "description": "Enter SchoolSoft guardian credentials (usertype 2).", "data": {"student_name": "Student name", "school_url": "SchoolSoft school URL", "username": "Guardian username", "password": "Guardian password"}}}, "error": {"invalid_auth": "Could not authenticate as a guardian.", "cannot_connect": "Could not connect to SchoolSoft."}}
+  "config": {
+    "step": {
+      "user": {
+        "title": "SchoolSoft",
+        "description": "Enter SchoolSoft guardian credentials (usertype 2).",
+        "data": {
+          "student_name": "Student name",
+          "school_url": "SchoolSoft school URL",
+          "username": "Guardian username",
+          "password": "Guardian password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Could not authenticate as a guardian.",
+      "cannot_connect": "Could not connect to SchoolSoft."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "SchoolSoft timetable source",
+        "description": "Optional: use your private SchoolSoft iCalendar subscription for the timetable. Guardian login remains the attendance source.",
+        "data": {
+          "ical_url": "Private iCalendar subscription URL"
+        }
+      }
+    }
+  }
 }

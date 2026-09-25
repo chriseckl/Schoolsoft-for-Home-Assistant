@@ -7,12 +7,13 @@ from datetime import date, datetime, time, timedelta
 from html.parser import HTMLParser
 import re
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from aiohttp import ClientSession
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_SCHOOL_URL
+from .const import CONF_ICAL_URL, CONF_SCHOOL_URL
 
 _TIME_RANGE = re.compile(r"(?P<start>\d{1,2}:\d{2})\s*[-–]\s*(?P<end>\d{1,2}:\d{2})\s*(?P<title>.*?)(?=\s+\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}|$)")
 _DAY = re.compile(r"\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Måndag|Tisdag|Onsdag|Torsdag|Fredag|Lördag|Söndag)\b", re.I)
@@ -59,8 +60,9 @@ class _AttendanceExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self._capturing = False
+        self._href = ""
         self._parts: list[str] = []
-        self.records: list[str] = []
+        self.records: list[tuple[str, str]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag != "a":
@@ -68,6 +70,7 @@ class _AttendanceExtractor(HTMLParser):
         href = dict(attrs).get("href", "") or ""
         if "right_student_lesson_status.jsp" in href:
             self._capturing = True
+            self._href = href
             self._parts = []
 
     def handle_data(self, data: str) -> None:
@@ -76,8 +79,9 @@ class _AttendanceExtractor(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "a" and self._capturing:
-            self.records.append(" ".join(" ".join(self._parts).split()))
+            self.records.append((self._href, " ".join(" ".join(self._parts).split())))
             self._capturing = False
+            self._href = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +92,7 @@ class Lesson:
     start: datetime
     end: datetime
     attendance: str | None = None
+    lesson_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +104,7 @@ class AttendanceRecord:
     start: time
     subject: str
     status: str
+    lesson_id: str | None = None
 
 
 class SchoolSoftClient:
@@ -108,6 +114,7 @@ class SchoolSoftClient:
         self._session = session
         self._data = data
         self._base = data[CONF_SCHOOL_URL].rstrip("/")
+        self._ical_url = data.get(CONF_ICAL_URL, "").strip()
         self._logged_in = False
         self._lock = asyncio.Lock()
 
@@ -129,6 +136,17 @@ class SchoolSoftClient:
             if not await self._async_session_valid():
                 raise SchoolSoftAuthenticationError("Guardian session validation failed")
             self._logged_in = True
+
+    @property
+    def has_ical(self) -> bool:
+        return bool(self._ical_url)
+
+    async def async_fetch_ical(self) -> list[Lesson]:
+        """Fetch the private iCalendar subscription and retain lesson events."""
+        async with self._session.get(self._ical_url, timeout=30) as response:
+            if response.status != 200:
+                raise SchoolSoftError(f"iCalendar request failed: HTTP {response.status}")
+            return self._parse_ical(await response.text())
 
     async def _async_session_valid(self) -> bool:
         async with self._session.get(f"{self._base}/rest-api/session", timeout=20) as response:
@@ -177,11 +195,39 @@ class SchoolSoftClient:
         return sorted(set(lessons), key=lambda item: (item.start, item.end, item.summary))
 
     @staticmethod
+    def _parse_ical(payload: str) -> list[Lesson]:
+        """Parse the SchoolSoft iCalendar shape without a third-party dependency."""
+        lines = re.sub(r"\r?\n[ \t]", "", payload).splitlines()
+        events: list[dict[str, str]] = []
+        current: dict[str, str] | None = None
+        for line in lines:
+            if line == "BEGIN:VEVENT":
+                current = {}
+            elif line == "END:VEVENT" and current is not None:
+                events.append(current)
+                current = None
+            elif current is not None and ":" in line:
+                key, value = line.split(":", 1)
+                current[key] = value
+        lessons: list[Lesson] = []
+        for event in events:
+            uid = event.get("UID", "")
+            match = re.match(r"lesson-(\d+)-", uid)
+            summary = event.get("SUMMARY", "").replace("\\,", ",").strip()
+            if not match or summary.casefold() == "lesson lunch":
+                continue
+            start = _ical_datetime(event, "DTSTART")
+            end = _ical_datetime(event, "DTEND")
+            if start and end and end > start:
+                lessons.append(Lesson(summary.removeprefix("Lesson ").strip(), start, end, lesson_id=match.group(1)))
+        return sorted(set(lessons), key=lambda item: (item.start, item.end, item.summary))
+
+    @staticmethod
     def _parse_attendance(html: str) -> list[AttendanceRecord]:
         parser = _AttendanceExtractor()
         parser.feed(html)
         records: list[AttendanceRecord] = []
-        for value in parser.records:
+        for href, value in parser.records:
             match = _ATTENDANCE_LINE.fullmatch(value)
             if not match:
                 continue
@@ -194,7 +240,15 @@ class SchoolSoftClient:
                 continue
             month = _SWEDISH_MONTHS.get(match.group("month").lower()[:3])
             if month:
-                records.append(AttendanceRecord(int(match.group("day")), month, _parse_time(match.group("time")), match.group("subject"), kind))
+                lesson_match = re.search(r"[?&]lesson=(\d+)", href)
+                records.append(AttendanceRecord(
+                    int(match.group("day")),
+                    month,
+                    _parse_time(match.group("time")),
+                    match.group("subject"),
+                    kind,
+                    lesson_match.group(1) if lesson_match else None,
+                ))
         return records
 
 
@@ -202,8 +256,19 @@ def apply_attendance(lessons: list[Lesson], records: list[AttendanceRecord]) -> 
     """Attach SchoolSoft's per-lesson late/absent status to the timetable."""
     marked: list[Lesson] = []
     for lesson in lessons:
-        status = next((record.status for record in records if record.day == lesson.start.day and record.month == lesson.start.month and record.start == lesson.start.time().replace(tzinfo=None) and lesson.summary.casefold().startswith(record.subject.casefold())), None)
-        marked.append(Lesson(lesson.summary, lesson.start, lesson.end, status))
+        status = next((
+            record.status for record in records
+            if lesson.lesson_id and record.lesson_id == lesson.lesson_id
+        ), None)
+        if status is None:
+            status = next((
+                record.status for record in records
+                if record.day == lesson.start.day
+                and record.month == lesson.start.month
+                and record.start == lesson.start.time().replace(tzinfo=None)
+                and lesson.summary.casefold().startswith(record.subject.casefold())
+            ), None)
+        marked.append(Lesson(lesson.summary, lesson.start, lesson.end, status, lesson.lesson_id))
     return marked
 
 
@@ -219,3 +284,19 @@ def _parse_time(value: str) -> time:
     """Parse SchoolSoft times, which may have a one-digit hour."""
     hour, minute = value.split(":", 1)
     return time(int(hour), int(minute))
+
+
+def _ical_datetime(event: dict[str, str], name: str) -> datetime | None:
+    key = next((key for key in event if key == name or key.startswith(f"{name};")), None)
+    if not key or "VALUE=DATE" in key:
+        return None
+    is_utc = event[key].endswith("Z")
+    value = event[key].rstrip("Z")
+    try:
+        parsed = datetime.strptime(value, "%Y%m%dT%H%M%S")
+    except ValueError:
+        return None
+    if is_utc:
+        return parsed.replace(tzinfo=ZoneInfo("UTC")).astimezone(dt_util.DEFAULT_TIME_ZONE)
+    tz_match = re.search(r"TZID=([^;:]+)", key)
+    return parsed.replace(tzinfo=ZoneInfo(tz_match.group(1) if tz_match else "Europe/Stockholm"))
