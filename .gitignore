@@ -1,0 +1,10 @@
+# Home Assistant secrets and generated files
+secrets.yaml
+.storage/
+home-assistant*.db*
+*.log
+__pycache__/
+*.py[cod]
+
+# Do not commit copied session/cookie files
+*schoolsoft*session*

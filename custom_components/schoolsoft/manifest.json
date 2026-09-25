@@ -1,0 +1,10 @@
+{
+  "domain": "schoolsoft",
+  "name": "SchoolSoft",
+  "codeowners": ["@local"],
+  "config_flow": true,
+  "documentation": "https://sms.schoolsoft.se/",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "1.0.0"
+}
