@@ -42,6 +42,13 @@ def _next(data):
     return next((x.summary for x in data["lessons"] if x.start > now), None)
 
 
+def _current_attendance(data):
+    """Return only the attendance status for the lesson happening now."""
+    now = dt_util.now()
+    lesson = next((x for x in data["lessons"] if x.start <= now < x.end), None)
+    return lesson.attendance if lesson and lesson.attendance else "none"
+
+
 def _school_start(data):
     today = dt_util.now().date()
     values = [x.start.time().isoformat(timespec="minutes") for x in data["lessons"] if x.start.date() == today]
@@ -56,6 +63,7 @@ def _school_end(data):
 
 _SENSORS = [
     ("current_lesson", "Current lesson", _current), ("next_lesson", "Next lesson", _next),
+    ("current_lesson_attendance", "Current lesson attendance", _current_attendance),
     ("school_start", "School start", _school_start), ("school_end", "School end", _school_end),
     ("absence", "Absence", lambda d: d["attendance"]["absence"]),
     ("late_arrival", "Late arrival", lambda d: d["attendance"]["late_minutes"]),

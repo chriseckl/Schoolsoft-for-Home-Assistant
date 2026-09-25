@@ -10,6 +10,7 @@ It signs in as a **guardian** (`usertype=2`) and reads the authenticated weekly 
 
 - A calendar entity, for example `calendar.student_school`
 - Current and next lesson sensors
+- A `current_lesson_attendance` sensor with `absent`, `late`, or `none`
 - Today's school start and end time sensors
 - Attendance sensors: absence, late arrival, left/out early, and other school activity
 - Per-lesson labels in the calendar:
@@ -80,6 +81,33 @@ entities:
   - sensor.school_start
   - sensor.school_end
 ```
+
+## Telegram alert for the current lesson
+
+Set up the official **Telegram bot** integration in Home Assistant first. A send-only **Broadcast** bot is sufficient and does not require exposing Home Assistant to the internet. Follow Home Assistant's [Telegram bot setup guide](https://www.home-assistant.io/integrations/telegram_bot/), create a bot with `@BotFather`, start a chat with it, and add your Telegram chat ID to the integration's allowed chat IDs.
+
+Then create an automation in **Settings** → **Automations & scenes**. In YAML mode, use the following and replace `notify.telegram_bot_your_chat` with the notify entity created for your allowed chat ID:
+
+```yaml
+alias: SchoolSoft – current lesson attendance
+description: Notify once when the current SchoolSoft lesson is marked absent or late.
+triggers:
+  - trigger: state
+    entity_id: sensor.current_lesson_attendance
+    to:
+      - absent
+      - late
+actions:
+  - action: notify.send_message
+    data:
+      entity_id: notify.telegram_bot_your_chat
+      message: >-
+        SchoolSoft: {{ states('sensor.current_lesson') }} is marked
+        {{ trigger.to_state.state }}.
+mode: single
+```
+
+SchoolSoft reports attendance asynchronously and this integration refreshes every 30 minutes, so an alert can arrive up to one refresh interval after a teacher records it.
 
 ## Privacy and security
 
