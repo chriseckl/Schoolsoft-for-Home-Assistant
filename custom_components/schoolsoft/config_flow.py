@@ -46,7 +46,7 @@ class SchoolSoftConfigFlow(ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return SchoolSoftOptionsFlow(config_entry)
+        return SchoolSoftOptionsFlow()
 
 
 class SchoolSoftOptionsFlow(OptionsFlow):
