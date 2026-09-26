@@ -52,9 +52,6 @@ class SchoolSoftConfigFlow(ConfigFlow, domain=DOMAIN):
 class SchoolSoftOptionsFlow(OptionsFlow):
     """Configure optional SchoolSoft sources."""
 
-    def __init__(self, config_entry) -> None:
-        self.config_entry = config_entry
-
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         if user_input is not None:
             return self.async_create_entry(title="", data={CONF_ICAL_URL: user_input[CONF_ICAL_URL].strip()})
